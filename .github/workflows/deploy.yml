@@ -39,7 +39,7 @@ jobs:
       IMAGE: ${{ secrets.ACR_SERVER }}/ecomapi:${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       # The registry credential is an ACR repository-scoped token rather than an
       # Azure identity, because workload identity federation needs an app
