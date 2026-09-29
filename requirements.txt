@@ -20,7 +20,7 @@ uvicorn[standard]==0.52.4
 
 # Data validation
 pydantic==2.13.4
-pydantic-settings==2.14.2
+pydantic-settings==2.15.0
 email-validator==2.3.0
 
 # Database
