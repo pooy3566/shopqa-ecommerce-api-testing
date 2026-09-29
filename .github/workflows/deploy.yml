@@ -1,0 +1,127 @@
+name: deploy
+
+# Only on main, and only after someone pushes. Deploying from a pull request
+# would let a fork's code run against the cluster, and on a public repository
+# that is how a demo becomes an incident. GitHub also withholds secrets from
+# fork pull requests, so such a run would fail confusingly rather than safely.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Two deploys racing the same cluster is how a rollout ends up half-applied.
+  # A newer push cancels an in-flight older one.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: build arm64, migrate, roll out
+    # NATIVE ARM, AND THIS IS NOT A PREFERENCE.
+    #
+    # The AKS nodes are Standard_B2ps_v2, which is Arm, because every x64
+    # 2-vCPU family has 0/0 quota on this subscription. An amd64 image reaches
+    # the node and dies with `exec format error`.
+    #
+    # ubuntu-24.04-arm is a real Arm runner, free for public repositories, so
+    # the build is native. Building Arm on an x64 runner means QEMU emulation
+    # and roughly a twentyfold slowdown for compiled wheels.
+    runs-on: ubuntu-24.04-arm
+
+    # Guard against a hung emulated build burning the whole Actions budget.
+    timeout-minutes: 30
+
+    env:
+      IMAGE: ${{ secrets.ACR_SERVER }}/ecomapi:${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      # The registry credential is an ACR repository-scoped token rather than an
+      # Azure identity, because workload identity federation needs an app
+      # registration that is not available in this directory. This token can push
+      # and pull the `ecomapi` repository in one registry and nothing else.
+      - name: Log in to ACR
+        run: |
+          # An unset or empty secret renders as an empty string here, and the
+          # resulting `echo "" | docker login` fails with "Cannot perform an
+          # interactive login from a non TTY device", which points at TTYs
+          # rather than at the real cause. Say the real cause instead.
+          test -n "${{ secrets.ACR_PASSWORD }}" || {
+            echo "ACR_PASSWORD secret is empty or unset"; exit 1; }
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login "${{ secrets.ACR_SERVER }}" \
+            --username "${{ secrets.ACR_USERNAME }}" --password-stdin
+
+      # Tagged with the commit sha, never `latest`. A mutable tag means the
+      # thing running in the cluster cannot be traced back to a commit, and
+      # Kubernetes will not re-pull an unchanged tag, so a "deploy" can
+      # silently do nothing.
+      - name: Build and push
+        run: docker buildx build --tag "$IMAGE" --push .
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p "$HOME/.kube"
+          echo "${{ secrets.KUBE_CONFIG }}" > "$HOME/.kube/config"
+          chmod 600 "$HOME/.kube/config"
+          kubectl config current-context
+
+      - name: Apply configuration
+        run: kubectl apply -f k8s/configmap.yaml
+
+      # Migrations run to completion BEFORE the app rolls. Two replicas racing
+      # `alembic upgrade head` on startup is a real failure mode; a Job is one
+      # pod, run once, and it must exit 0.
+      #
+      # A completed Job's pod template is immutable, so the previous one is
+      # deleted first or the apply fails with "field is immutable".
+      - name: Run database migrations
+        run: |
+          kubectl delete job ecomapi-migrate --ignore-not-found
+          sed "s|__IMAGE__|${IMAGE}|g" k8s/migrate-job.yaml | kubectl apply -f -
+          kubectl wait --for=condition=complete job/ecomapi-migrate --timeout=300s
+
+      - name: Show migration output
+        if: always()
+        run: kubectl logs job/ecomapi-migrate --tail=40 || true
+
+      - name: Roll out
+        run: |
+          sed "s|__IMAGE__|${IMAGE}|g" k8s/deployment.yaml | kubectl apply -f -
+          kubectl apply -f k8s/poddisruptionbudget.yaml
+          # Blocks until every new pod is READY and returns non-zero if the
+          # rollout stalls, so a broken deploy fails the pipeline instead of
+          # reporting success.
+          kubectl rollout status deployment/ecomapi --timeout=300s
+
+      # Proves the deployed revision actually serves traffic. A green rollout
+      # only says the pods passed their probes.
+      - name: Verify through the load balancer
+        run: |
+          IP=$(kubectl get service ecomapi -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          echo "live at http://${IP}"
+          curl -fsS --retry 5 --retry-delay 3 "http://${IP}/health"
+
+      # One pod per node is the whole basis of the availability claim, and it
+      # broke silently once already: the topology spread constraint matched the
+      # outgoing ReplicaSet's pods during a rollout, so both replicas ended up
+      # on one node with DoNotSchedule set and no error anywhere. Assert it on
+      # every deploy rather than trusting the manifest.
+      - name: Assert replicas are spread across nodes
+        run: |
+          NODES=$(kubectl get pods -l app=ecomapi \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l)
+          echo "distinct nodes running replicas: ${NODES}"
+          test "${NODES}" -ge 2
+
+      - name: Diagnose a failed deploy
+        if: failure()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl describe deployment ecomapi || true
+          kubectl logs -l app=ecomapi --tail=50 --all-containers || true

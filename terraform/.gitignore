@@ -1,0 +1,29 @@
+# Terraform state. Contains the generated Postgres password IN PLAIN TEXT, plus
+# every resource id. This is the single most sensitive file in the repository
+# and it must never be committed.
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash log, which can also contain state fragments.
+crash.log
+crash.*.log
+
+# Provider plugins. Hundreds of megabytes, re-downloaded by `terraform init`.
+.terraform/
+.terraform.tfstate.lock.info
+
+# Real variable values, including subscription id.
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Saved plan files. A plan can embed sensitive values.
+# Both spellings: `-out=tfplan` produces a file with no extension, which
+# `*.tfplan` does not match. That gap left a plan file stageable.
+*.tfplan
+tfplan
+
+# NOT ignored, deliberately:
+#   .terraform.lock.hcl  - pins exact provider versions, must be committed so a
+#                          rebuild months later produces identical infrastructure

@@ -1,0 +1,19 @@
+# Non-secret configuration.
+#
+# The split between this file and the Secret is the whole point: these values are
+# safe to read, safe to commit, and safe to print in a log. Anything that would
+# not be is in the Secret instead. Mixing them is how credentials end up in a
+# `kubectl describe` that someone screenshots.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ecomapi-config
+data:
+  PROJECT_NAME: "E-Commerce API"
+  VERSION: "1.0.0"
+  API_V1_STR: "/api/v1"
+  ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  # DEBUG stays false in a deployed environment. The app's own settings module
+  # treats this as load-bearing: debug mode changes error output.
+  DEBUG: "false"
