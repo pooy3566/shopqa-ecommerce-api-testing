@@ -16,7 +16,7 @@ python-multipart==0.0.32
 # is required to serve the application. Note that the test suite does not
 # exercise it: pytest drives the app through httpx's ASGI transport in-process,
 # so a missing server is not something the tests can detect.
-uvicorn[standard]==0.52.4
+uvicorn[standard]==0.54.0
 
 # Data validation
 pydantic==2.13.4
