@@ -1,0 +1,20 @@
+# The Service is a stable address in front of a set of pods that are not stable.
+#
+# Pods are created and destroyed constantly (deploys, crashes, node drains) and
+# each gets a new IP. The Service watches for pods matching `selector` and keeps
+# routing to whichever ones are currently READY. That indirection is what makes
+# a rolling deploy invisible to a caller.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ecomapi
+spec:
+  # LoadBalancer provisions an Azure public IP and wires it to these pods.
+  type: LoadBalancer
+  selector:
+    app: ecomapi
+  ports:
+    - name: http
+      port: 80          # what the outside world calls
+      targetPort: 8000  # what the container listens on (see Dockerfile EXPOSE)
+      protocol: TCP

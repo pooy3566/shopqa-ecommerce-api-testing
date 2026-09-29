@@ -1,0 +1,18 @@
+# A PodDisruptionBudget is what makes `kubectl drain` safe.
+#
+# Without it, draining a node evicts every pod on it immediately. With two
+# replicas on two nodes, that is survivable by luck. With this, it is guaranteed:
+# Kubernetes refuses to evict a pod if doing so would drop the number of
+# available pods below 1, and waits instead.
+#
+# This is the difference between "it happened to stay up" and "it was designed
+# to stay up", and it is worth being able to say which one you built.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ecomapi
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ecomapi

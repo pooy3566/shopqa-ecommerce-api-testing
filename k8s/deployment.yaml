@@ -1,0 +1,129 @@
+# The application itself.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ecomapi
+  labels:
+    app: ecomapi
+spec:
+  # Two, so one can die without the service dying. One replica plus a restart is
+  # not availability, it is a shorter outage.
+  replicas: 2
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never drop below the desired count during a deploy: bring the new pod up
+      # and prove it READY before taking an old one away. This pair of numbers is
+      # what makes a deploy zero-downtime.
+      maxUnavailable: 0
+      maxSurge: 1
+
+  selector:
+    matchLabels:
+      app: ecomapi
+
+  template:
+    metadata:
+      labels:
+        app: ecomapi
+    spec:
+      # Put the two replicas on DIFFERENT NODES.
+      #
+      # Without this the scheduler is free to place both on one node, and losing
+      # that node takes the whole service with it. Two replicas on one node
+      # survives a pod crash but not a node failure, and claiming "high
+      # availability" for that arrangement would not be true.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: ecomapi
+          # WITHOUT THIS LINE THE CONSTRAINT SILENTLY STOPS WORKING ON EVERY
+          # DEPLOY, WHICH IS THE ONLY TIME IT MATTERS.
+          #
+          # Observed 2026-09-01: after a rolling update both replicas were on the
+          # same node, with DoNotSchedule set and no error anywhere.
+          #
+          # During a rollout the old ReplicaSet's pods still carry app=ecomapi,
+          # so the selector above matches them too. The scheduler places each new
+          # pod to balance against pods that are about to be deleted, and once
+          # they go the survivors can sit together. The constraint was satisfied
+          # at the moment of scheduling and meaningless a minute later.
+          #
+          # matchLabelKeys adds pod-template-hash to the selector, so spreading is
+          # computed only against pods of the SAME revision. Stable since 1.30;
+          # this cluster is 1.35.
+          matchLabelKeys:
+            - pod-template-hash
+
+      securityContext:
+        # The Dockerfile already creates and switches to uid 1000. This asserts
+        # it at the cluster level too, so a future image that forgot is rejected
+        # rather than quietly running as root.
+        runAsNonRoot: true
+        runAsUser: 1000
+
+      containers:
+        - name: api
+          image: __IMAGE__
+          ports:
+            - name: http
+              containerPort: 8000
+
+          envFrom:
+            - configMapRef:
+                name: ecomapi-config
+            - secretRef:
+                name: ecomapi-secrets
+
+          # THE TWO PROBES DO DIFFERENT JOBS, AND CONFUSING THEM CAUSES OUTAGES.
+          #
+          # readiness: "should this pod receive traffic right now?"
+          #   Failing removes it from the Service. Nothing is killed.
+          # liveness: "is this pod wedged and beyond recovery?"
+          #   Failing RESTARTS the container.
+          #
+          # If liveness is too aggressive, a slow-but-healthy pod gets killed in a
+          # loop and a traffic spike turns into a self-inflicted outage. So
+          # liveness is given a longer period and more failures before acting.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 5
+
+          # requests = what the scheduler reserves, and what it uses to decide
+          #            whether a node has room.
+          # limits   = the hard ceiling. Exceeding the memory limit is an OOMKill.
+          #
+          # No CPU limit on purpose: a CPU limit throttles rather than kills, and
+          # throttling a request-serving process to save a burstable node from
+          # itself makes latency worse for no benefit.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+
+          # Give in-flight requests time to finish before the process is killed
+          # during a rolling deploy.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+
+      terminationGracePeriodSeconds: 30

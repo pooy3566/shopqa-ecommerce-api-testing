@@ -1,0 +1,15 @@
+// Copy this to terraform.tfvars and fill in your subscription id.
+// terraform.tfvars is gitignored; this example file is not.
+//
+//   cp terraform.tfvars.example terraform.tfvars
+//   az account show --query id -o tsv        # paste the result below
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+// Everything below has a working default in variables.tf. Uncomment only to
+// override.
+//
+// location   = "southcentralus"
+// prefix     = "ecomapi"
+// node_count = 2
+// node_size  = "Standard_B2ps_v2"

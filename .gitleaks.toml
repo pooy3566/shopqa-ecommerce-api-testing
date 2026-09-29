@@ -1,0 +1,28 @@
+# gitleaks configuration. Extends the bundled default ruleset.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secret placeholders. Each entry is a documented false positive."
+regexes = [
+  # Example/placeholder keys shipped in .env.example and docs, never live creds.
+  '''your-secret-key-change-in-production''',
+  '''your_password_here''',
+  # Docs tell the reader to substitute their own token. Flagged by curl-auth-header
+  # and generic-api-key in older README revisions; gitleaks scans full history.
+  '''YOUR_TOKEN(_HERE)?''',
+  # The base64 of {"alg":"HS256","typ":"JWT"}, i.e. a truncated specimen JWT in the
+  # README's example response. It is the algorithm header every HS256 token starts
+  # with, carries no payload and no signature, and is not a credential.
+  '''eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9''',
+  # Fixture credentials asserted on by the security tests. These strings exist so
+  # the suite can prove weak and placeholder keys are REJECTED at boot; they are
+  # the test's subject matter, not a leak.
+  '''LongEnoughPass123''',
+  '''tooshort''',
+]
+paths = [
+  '''\.env\.example$''',
+  # Test fixtures only. Application and config code is still scanned in full.
+  '''^tests/''',
+]

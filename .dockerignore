@@ -1,0 +1,47 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.env
+.venv
+venv/
+ENV/
+env/
+.git
+.gitignore
+.pytest_cache
+.coverage
+htmlcov/
+*.log
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+docker-compose.yml
+Dockerfile
+.dockerignore
+README.md
+PROJECT_BRIEF.md
+tests/
+
+# Infrastructure code, which does not belong in the application image.
+#
+# These entries are load-bearing rather than tidiness: the Dockerfile ends with
+# `COPY . .`, and terraform state contains generated credentials in plain text.
+# Without these lines that state is uploaded in the build context and baked into
+# a layer readable by anyone who can pull the image. Excluding .terraform/ also
+# keeps the context small, since it holds the provider plugins.
+terraform/
+k8s/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform/
